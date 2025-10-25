@@ -14,6 +14,7 @@
 - ✅ Create Relations: REST `/rest/metadata/fields` with `relationCreationPayload`
 - ✅ Create Views: GraphQL `/metadata` endpoint, `createCoreView` mutation
 - ✅ Data CRUD: GraphQL `/graphql` endpoint
+- ✅ Search & Filter: GraphQL `/graphql` with advanced operators
 - ✅ All operations work with API Keys (Bearer token)
 
 ### Authentication
@@ -38,7 +39,20 @@ Get from: Settings → APIs & Webhooks
 | `/rest/metadata/fields` | POST | Create field | API Key ✅ |
 | `/rest/metadata/fields/{id}` | PATCH | Update field | API Key ✅ |
 | `/rest/metadata/fields/{id}` | DELETE | Delete field | API Key ✅ |
-| `/graphql` | POST | Data operations (CRUD) | API Key ✅ |
+| `/graphql` | POST | Data operations (CRUD, Search, Filter) | API Key ✅ |
+
+---
+
+## TABLE OF CONTENTS
+
+1. **OBJECTS** - Create and manage object schemas
+2. **FIELDS** - Add fields to objects
+3. **RELATIONS** - Link objects together
+4. **VIEWS** - Create different data views
+5. **DATA OPERATIONS** - CRUD operations on records
+6. **SEARCH & FILTERING** - Query and filter data
+7. **BATCH OPERATIONS** - Bulk create/update
+8. **COMPLETE WORKFLOWS** - End-to-end examples
 
 ---
 
@@ -191,46 +205,232 @@ requests.post(f"{API_URL}/metadata", headers=HEADERS, json={"query": mutation})
 - `calendar`: Calendar view (best for date-based data)
 - `gallery`: Gallery/card view (best for visual data)
 
-### Get Views
+---
+
+## DATA OPERATIONS (CRUD)
+
+### Create Record
 ```python
+# Example: Create a person record
+mutation = """
+mutation {
+  createPerson(data: {
+    name: {firstName: "John", lastName: "Doe"}
+    email: "john@example.com"
+    phone: "+1234567890"
+  }) {
+    id
+    name { firstName lastName }
+    email
+  }
+}
+"""
+response = requests.post(f"{API_URL}/graphql", headers=HEADERS, json={"query": mutation})
+record_id = response.json()["data"]["createPerson"]["id"]
+```
+
+### Read Records
+```python
+# Get all records
 query = """
 query {
-  getCoreViews(objectMetadataId: "%s") {
-    id
-    name
-    type
+  people {
+    edges {
+      node {
+        id
+        name { firstName lastName }
+        email
+        phone
+      }
+    }
   }
 }
-""" % object_id
+"""
+response = requests.post(f"{API_URL}/graphql", headers=HEADERS, json={"query": query})
+records = response.json()["data"]["people"]["edges"]
+
+# Get single record by ID
+query = 'query { person(id: "%s") { id name { firstName lastName } email } }' % record_id
 ```
 
-### Update View
+### Update Record
 ```python
 mutation = """
 mutation {
-  updateCoreView(id: "%s", input: {name: "New Name"}) {
-    id
-    name
+  updatePerson(id: "%s", data: {email: "new@example.com", phone: "+9876543210"}) {
+    id email phone
   }
 }
-""" % view_id
+""" % record_id
+response = requests.post(f"{API_URL}/graphql", headers=HEADERS, json={"query": mutation})
 ```
 
-### Delete View
+### Delete Record
 ```python
-mutation = """
-mutation {
-  deleteCoreView(id: "%s")
-}
-""" % view_id
+mutation = 'mutation { deletePerson(id: "%s") { id } }' % record_id
+response = requests.post(f"{API_URL}/graphql", headers=HEADERS, json={"query": mutation})
+```
+
+### Custom Object CRUD
+```python
+# For custom objects, use object name (plural, camelCase)
+# Example: "project" object
+
+# Create
+mutation = 'mutation { createProject(data: {projectName: "Website", status: "ACTIVE"}) { id projectName } }'
+
+# Read all
+query = 'query { projects { edges { node { id projectName status } } } }'
+
+# Update
+mutation = 'mutation { updateProject(id: "%s", data: {status: "COMPLETED"}) { id status } }' % project_id
+
+# Delete
+mutation = 'mutation { deleteProject(id: "%s") { id } }' % project_id
 ```
 
 ---
 
-## COMPLETE AUTOMATION WORKFLOW
+## SEARCH & FILTERING
 
-### Step-by-Step
+### Basic Search
 ```python
+query = """
+query {
+  people(filter: {name: {firstName: {eq: "John"}}}) {
+    edges { node { id name { firstName lastName } email } }
+  }
+}
+"""
+```
+
+### Advanced Filtering
+```python
+# AND condition
+query = """
+query {
+  projects(filter: {
+    and: [
+      {status: {eq: "ACTIVE"}}
+      {deadline: {gte: "2025-01-01"}}
+    ]
+  }) {
+    edges { node { id projectName status deadline } }
+  }
+}
+"""
+
+# OR condition
+query = """
+query {
+  projects(filter: {
+    or: [
+      {status: {eq: "ACTIVE"}}
+      {status: {eq: "IN_PROGRESS"}}
+    ]
+  }) {
+    edges { node { id projectName status } }
+  }
+}
+"""
+```
+
+### Filter Operators
+| Operator | Description | Example |
+|----------|-------------|---------|  
+| `eq` | Equals | `{status: {eq: "ACTIVE"}}` |
+| `neq` | Not equals | `{status: {neq: "COMPLETED"}}` |
+| `gt` | Greater than | `{amount: {gt: 1000}}` |
+| `gte` | Greater than or equal | `{deadline: {gte: "2025-01-01"}}` |
+| `lt` | Less than | `{amount: {lt: 5000}}` |
+| `lte` | Less than or equal | `{deadline: {lte: "2025-12-31"}}` |
+| `in` | In array | `{status: {in: ["ACTIVE", "PENDING"]}}` |
+| `contains` | Contains text | `{name: {contains: "John"}}` |
+| `startsWith` | Starts with | `{email: {startsWith: "john"}}` |
+| `endsWith` | Ends with | `{email: {endsWith: "@example.com"}}` |
+
+### Pagination
+```python
+# First page
+query = """
+query {
+  projects(first: 10) {
+    edges { node { id projectName } cursor }
+    pageInfo { hasNextPage endCursor }
+  }
+}
+"""
+data = requests.post(f"{API_URL}/graphql", headers=HEADERS, json={"query": query}).json()["data"]["projects"]
+
+# Next page
+if data["pageInfo"]["hasNextPage"]:
+    query = 'query { projects(first: 10, after: "%s") { edges { node { id } } pageInfo { hasNextPage endCursor } } }' % data["pageInfo"]["endCursor"]
+```
+
+### Sorting
+```python
+# Single field
+query = 'query { projects(orderBy: {createdAt: DESC}) { edges { node { id projectName createdAt } } } }'
+
+# Multiple fields
+query = 'query { projects(orderBy: [{status: ASC}, {deadline: DESC}]) { edges { node { id projectName status deadline } } } }'
+```
+
+---
+
+## BATCH OPERATIONS
+
+### Create Multiple Records
+```python
+records = [
+    {"projectName": "Project A", "status": "ACTIVE"},
+    {"projectName": "Project B", "status": "PENDING"}
+]
+
+for record in records:
+    mutation = 'mutation { createProject(data: {projectName: "%s", status: "%s"}) { id } }' % (record["projectName"], record["status"])
+    requests.post(f"{API_URL}/graphql", headers=HEADERS, json={"query": mutation})
+    time.sleep(0.1)
+```
+
+### Bulk Update
+```python
+# Get records
+query = 'query { projects(filter: {status: {eq: "PENDING"}}) { edges { node { id } } } }'
+records = requests.post(f"{API_URL}/graphql", headers=HEADERS, json={"query": query}).json()["data"]["projects"]["edges"]
+
+# Update each
+for record in records:
+    mutation = 'mutation { updateProject(id: "%s", data: {status: "ACTIVE"}) { id } }' % record["node"]["id"]
+    requests.post(f"{API_URL}/graphql", headers=HEADERS, json={"query": mutation})
+    time.sleep(0.1)
+```
+
+---
+
+## RELATIONS IN DATA
+
+### Create Record with Relation
+```python
+mutation = 'mutation { createTask(data: {title: "Design", status: "TODO", projectRelationId: "%s"}) { id title projectRelation { id projectName } } }' % project_id
+```
+
+### Query with Relations
+```python
+query = 'query { project(id: "%s") { id projectName tasks { edges { node { id title status } } } } }' % project_id
+```
+
+### Update Relation
+```python
+mutation = 'mutation { updateTask(id: "%s", data: {projectRelationId: "%s"}) { id projectRelation { id projectName } } }' % (task_id, new_project_id)
+```
+
+---
+
+## COMPLETE WORKFLOW
+
+```python
+#!/usr/bin/env python3
 import requests
 import time
 
@@ -238,307 +438,88 @@ API_URL = "https://your-instance.com"
 API_KEY = "your-api-key"
 HEADERS = {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"}
 
-# 1. Create Object
-mutation = """
-mutation {
-  createOneObject(input: {
-    object: {
-      nameSingular: "project"
-      namePlural: "projects"
-      labelSingular: "Project"
-      labelPlural: "Projects"
-      icon: "IconFolder"
-    }
-  }) { id }
-}
-"""
-r = requests.post(f"{API_URL}/metadata", headers=HEADERS, json={"query": mutation})
-object_id = r.json()["data"]["createOneObject"]["id"]
+def create_project(name, status):
+    mutation = f'mutation {{ createProject(data: {{projectName: "{name}", status: "{status}"}}) {{ id projectName }} }}'
+    r = requests.post(f"{API_URL}/graphql", headers=HEADERS, json={"query": mutation})
+    return r.json()["data"]["createProject"]["id"]
 
-# 2. Create Fields
-fields = [
-    {"name": "projectName", "label": "Project Name", "type": "TEXT", "icon": "IconTag"},
-    {"name": "deadline", "label": "Deadline", "type": "DATE", "icon": "IconCalendar"},
-    {"name": "status", "label": "Status", "type": "SELECT", "icon": "IconFlag",
-     "options": [
-         {"label": "Active", "value": "ACTIVE", "color": "green", "position": 0},
-         {"label": "Completed", "value": "COMPLETED", "color": "blue", "position": 1}
-     ]}
-]
+def search_projects(status):
+    query = f'query {{ projects(filter: {{status: {{eq: "{status}"}}}}) {{ edges {{ node {{ id projectName status }} }} }} }}'
+    r = requests.post(f"{API_URL}/graphql", headers=HEADERS, json={"query": query})
+    return r.json()["data"]["projects"]["edges"]
 
-for field in fields:
-    field["objectMetadataId"] = object_id
-    requests.post(f"{API_URL}/rest/metadata/fields", headers=HEADERS, json=field)
-    time.sleep(0.2)
+def update_status(project_id, new_status):
+    mutation = f'mutation {{ updateProject(id: "{project_id}", data: {{status: "{new_status}"}}) {{ id status }} }}'
+    return requests.post(f"{API_URL}/graphql", headers=HEADERS, json={"query": mutation}).json()
 
-# 3. Create Views
-views = [
-    {"name": "All Projects", "type": "table", "icon": "IconTable"},
-    {"name": "Project Board", "type": "kanban", "icon": "IconLayoutKanban"}
-]
+def delete_project(project_id):
+    mutation = f'mutation {{ deleteProject(id: "{project_id}") {{ id }} }}'
+    return requests.post(f"{API_URL}/graphql", headers=HEADERS, json={"query": mutation}).json()
 
-for view in views:
-    mutation = """
-    mutation {
-      createCoreView(input: {
-        objectMetadataId: "%s"
-        name: "%s"
-        type: "%s"
-        icon: "%s"
-      }) { id }
-    }
-    """ % (object_id, view["name"], view["type"], view["icon"])
-    requests.post(f"{API_URL}/metadata", headers=HEADERS, json={"query": mutation})
-    time.sleep(0.2)
+# Usage
+project_id = create_project("Website", "ACTIVE")
+print(f"✅ Created: {project_id}")
 
-# 4. Create Relations (if needed)
-# Get target object ID first
-r = requests.get(f"{API_URL}/rest/metadata/objects", headers=HEADERS)
-target_obj = next((o for o in r.json()["data"]["objects"] if o["nameSingular"] == "client"), None)
+active = search_projects("ACTIVE")
+print(f"📊 Found {len(active)} active projects")
 
-if target_obj:
-    relation_data = {
-        "name": "clientRelation",
-        "label": "Client",
-        "type": "RELATION",
-        "icon": "IconLink",
-        "objectMetadataId": object_id,
-        "relationCreationPayload": {
-            "type": "MANY_TO_ONE",
-            "targetObjectMetadataId": target_obj["id"],
-            "targetFieldLabel": "Projects",
-            "targetFieldIcon": "IconLink"
-        }
-    }
-    requests.post(f"{API_URL}/rest/metadata/fields", headers=HEADERS, json=relation_data)
+update_status(project_id, "COMPLETED")
+print("✅ Updated")
 ```
-
----
-
-## ERROR HANDLING
-
-### Common Errors
-| Error | Cause | Solution |
-|-------|-------|----------|
-| `"not available"` | Field/Object name exists | Skip or use different name |
-| `"Invalid UUID"` | Object doesn't exist | Create object first |
-| `401 Unauthorized` | Invalid API key | Regenerate API key |
-| `400 Bad Request` | Invalid payload | Check field structure |
-
-### Validation
-```python
-response = requests.post(...)
-if response.status_code == 201:
-    # Success
-    data = response.json()
-elif response.status_code == 400 and "not available" in response.text:
-    # Already exists, skip
-    pass
-else:
-    # Error
-    print(f"Error: {response.text}")
-```
-
----
-
-## BEST PRACTICES
-
-### Naming Conventions
-- Field names: camelCase (`projectName`, `startDate`)
-- Field labels: Title Case (`Project Name`, `Start Date`)
-- Object names: camelCase singular/plural (`task`/`tasks`)
-- Object labels: Title Case (`Task`/`Tasks`)
-
-### Rate Limiting
-```python
-import time
-time.sleep(0.2)  # 200ms between requests
-```
-
-### Error Recovery
-```python
-def create_field_safe(object_id, field_config):
-    try:
-        response = create_field(object_id, field_config)
-        if response.status_code == 201:
-            return {"status": "created"}
-        elif "not available" in response.text:
-            return {"status": "exists"}
-        else:
-            return {"status": "error", "message": response.text}
-    except Exception as e:
-        return {"status": "error", "message": str(e)}
-```
-
-### Batch Operations
-```python
-stats = {"success": 0, "skipped": 0, "failed": 0}
-
-for field in fields:
-    response = create_field(object_id, field)
-    if response.status_code == 201:
-        stats["success"] += 1
-    elif "not available" in response.text:
-        stats["skipped"] += 1
-    else:
-        stats["failed"] += 1
-    time.sleep(0.2)
-
-print(f"✅ {stats['success']} | ⏭️ {stats['skipped']} | ❌ {stats['failed']}")
-```
-
----
-
-## ICONS
-
-### Common Icons
-- Objects: `IconFolder`, `IconBox`, `IconDatabase`
-- Text: `IconTag`, `IconFileText`, `IconNote`
-- Numbers: `IconNumber`, `IconClock`, `IconCurrencyDollar`
-- Dates: `IconCalendar`, `IconCalendarDue`, `IconClock`
-- Status: `IconFlag`, `IconCheck`, `IconX`
-- Relations: `IconLink`, `IconArrowRight`
-- Views: `IconTable`, `IconLayoutKanban`, `IconCalendar`, `IconLayoutGrid`
-- Actions: `IconPlus`, `IconEdit`, `IconTrash`
-- Categories: `IconCategory`, `IconTags`, `IconStar`
 
 ---
 
 ## QUICK REFERENCE
 
-### Get Object ID
+### Setup
 ```python
-r = requests.get(f"{API_URL}/rest/metadata/objects", headers=HEADERS)
-obj = next((o for o in r.json()["data"]["objects"] if o["nameSingular"] == "project"), None)
-object_id = obj["id"] if obj else None
-```
-
-### Create TEXT Field
-```python
-requests.post(f"{API_URL}/rest/metadata/fields", headers=HEADERS, json={
-    "name": "fieldName", "label": "Field Label", "type": "TEXT",
-    "icon": "IconTag", "objectMetadataId": object_id
-})
-```
-
-### Create SELECT Field
-```python
-requests.post(f"{API_URL}/rest/metadata/fields", headers=HEADERS, json={
-    "name": "status", "label": "Status", "type": "SELECT", "icon": "IconFlag",
-    "objectMetadataId": object_id,
-    "options": [{"label": "X", "value": "X", "color": "blue", "position": 0}]
-})
+import requests
+API_URL = "https://your-instance.com"
+API_KEY = "your-api-key"
+HEADERS = {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"}
 ```
 
 ### Create Object
 ```python
 mutation = 'mutation { createOneObject(input: {object: {nameSingular: "x", namePlural: "xs", labelSingular: "X", labelPlural: "Xs", icon: "IconTag"}}) { id } }'
-r = requests.post(f"{API_URL}/metadata", headers=HEADERS, json={"query": mutation})
-object_id = r.json()["data"]["createOneObject"]["id"]
+requests.post(f"{API_URL}/metadata", headers=HEADERS, json={"query": mutation})
+```
+
+### Create Field
+```python
+requests.post(f"{API_URL}/rest/metadata/fields", headers=HEADERS, json={
+    "name": "fieldName", "label": "Label", "type": "TEXT", "icon": "IconTag", "objectMetadataId": obj_id
+})
 ```
 
 ### Create View
 ```python
-mutation = 'mutation { createCoreView(input: {objectMetadataId: "%s", name: "All", type: "table", icon: "IconTable"}) { id } }' % object_id
+mutation = 'mutation { createCoreView(input: {objectMetadataId: "%s", name: "All", type: "table", icon: "IconTable"}) { id } }' % obj_id
 requests.post(f"{API_URL}/metadata", headers=HEADERS, json={"query": mutation})
 ```
 
-### Create Relation
+### CRUD Data
 ```python
-requests.post(f"{API_URL}/rest/metadata/fields", headers=HEADERS, json={
-    "name": "rel", "label": "Relation", "type": "RELATION", "icon": "IconLink",
-    "objectMetadataId": from_id,
-    "relationCreationPayload": {
-        "type": "MANY_TO_ONE", "targetObjectMetadataId": to_id,
-        "targetFieldLabel": "Items", "targetFieldIcon": "IconLink"
-    }
-})
+# Create
+mutation = 'mutation { createProject(data: {projectName: "X"}) { id } }'
+
+# Read
+query = 'query { projects { edges { node { id projectName } } } }'
+
+# Update
+mutation = 'mutation { updateProject(id: "%s", data: {projectName: "Y"}) { id } }' % id
+
+# Delete
+mutation = 'mutation { deleteProject(id: "%s") { id } }' % id
 ```
 
----
-
-## TESTING CHECKLIST
-
-Before deploying automation:
-- [ ] API key is valid (test with GET /rest/metadata/objects)
-- [ ] Object names are unique and follow camelCase
-- [ ] Field names are unique per object
-- [ ] SELECT fields have options array
-- [ ] Relations have both object IDs
-- [ ] Rate limiting is implemented (0.2s delay)
-- [ ] Error handling is in place
-- [ ] Success/failure logging is implemented
-
----
-
-## VERIFIED CAPABILITIES
-
-**Tested and Confirmed (2025-10-25):**
-- ✅ Create objects via GraphQL `/metadata`
-- ✅ Create fields via REST `/rest/metadata/fields`
-- ✅ Create relations via REST with payload
-- ✅ Create views via GraphQL `/metadata`
-- ✅ All operations work with API Keys
-- ✅ No JWT required
-- ✅ No UI required for setup
-- ✅ 100% automation possible
-
-**Test Results:**
-- Objects: Created `testObject` successfully (Status 200)
-- Fields: Created 45+ fields across 5 objects (Status 201)
-- Relations: Created 6 relations (Status 201)
-- Views: Mutation exists and accessible
-
----
-
-## PRODUCTION EXAMPLE
-
+### Search
 ```python
-#!/usr/bin/env python3
-"""Production-ready Twenty CRM automation"""
-import requests
-import time
-
-API_URL = "https://your-instance.com"
-API_KEY = "your-api-key"
-HEADERS = {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"}
-
-def get_object_id(name):
-    r = requests.get(f"{API_URL}/rest/metadata/objects", headers=HEADERS)
-    obj = next((o for o in r.json()["data"]["objects"] if o["nameSingular"] == name), None)
-    return obj["id"] if obj else None
-
-def create_object(singular, plural, label_s, label_p, icon="IconTag"):
-    mutation = f'''mutation {{ createOneObject(input: {{object: {{
-        nameSingular: "{singular}", namePlural: "{plural}",
-        labelSingular: "{label_s}", labelPlural: "{label_p}", icon: "{icon}"
-    }}}}) {{ id }} }}'''
-    r = requests.post(f"{API_URL}/metadata", headers=HEADERS, json={"query": mutation})
-    return r.json()["data"]["createOneObject"]["id"] if r.status_code == 200 else None
-
-def create_field(obj_id, name, label, ftype, icon="IconTag", options=None):
-    data = {"name": name, "label": label, "type": ftype, "icon": icon, "objectMetadataId": obj_id}
-    if options: data["options"] = options
-    r = requests.post(f"{API_URL}/rest/metadata/fields", headers=HEADERS, json=data)
-    return r.status_code == 201
-
-def create_view(obj_id, name, vtype="table", icon="IconTable"):
-    mutation = f'''mutation {{ createCoreView(input: {{
-        objectMetadataId: "{obj_id}", name: "{name}", type: "{vtype}", icon: "{icon}"
-    }}) {{ id }} }}'''
-    r = requests.post(f"{API_URL}/metadata", headers=HEADERS, json={"query": mutation})
-    return r.status_code == 200
-
-# Usage
-obj_id = create_object("task", "tasks", "Task", "Tasks", "IconCheckbox")
-create_field(obj_id, "title", "Title", "TEXT", "IconTag")
-create_field(obj_id, "status", "Status", "SELECT", "IconFlag", 
-    [{"label": "Todo", "value": "TODO", "color": "blue", "position": 0}])
-create_view(obj_id, "All Tasks", "table", "IconTable")
+query = 'query { projects(filter: {status: {eq: "ACTIVE"}}) { edges { node { id projectName } } } }'
 ```
 
 ---
 
 **END OF LLM REFERENCE**
 
-This document contains everything needed to automate Twenty CRM. No additional context required.
+This document contains everything needed to automate Twenty CRM including setup and data management. No additional context required.
